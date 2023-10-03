@@ -1,3 +1,11 @@
+#######################################################################
+# Copyright (C) 2023 Tristan Chorley (chorley.tristan@gmail.com)      #
+# Permission given to modify the code as long as you keep this        #
+# declaration at the top                                              #
+#######################################################################
+
+
+
 import numpy as np
 from numpy import log, exp, sqrt
 from scipy import stats
