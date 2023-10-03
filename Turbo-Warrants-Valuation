@@ -92,19 +92,6 @@ class TurboValuation:
         return self.dbs(x, y, t) + self.sigma * sqrt(t)
         
     def lookback_BSM(self, option_type: str, ST: float, max_share_price: float, min_share_price: float, rebate_maturity: float) -> float:
-        """
-        A European lookback call at maturity pays St - min(St).
-        A European lookback put at maturity pays max(St) - St.
-        min(St) is the minimum price over the life of the option
-        max(St) is the maximum price over the life of the option
-        Robert. L. MacDonald: Derivatives Markets (3rd. edition)
-        Chapter 23: Exotic Option II
-        Formula 23.47 (Exercise)
-        :param option_type: call, put
-        :param max_share_price: maximum share price
-        :param min_share_price: minimum share price
-        :return: value of lookback option
-        """
         
         assert option_type == "call" or option_type == "put"
 
