@@ -1,0 +1,309 @@
+import numpy as np
+from numpy import log, exp, sqrt
+from scipy import stats
+
+class TurboValuation:
+    """
+    Valuation of Turbo warrants in Black-Scholes-Merton Model (incl. dividend)
+    Attributes
+    ==========
+    S0: float
+        initial stock/index level
+    K: float
+        strike price
+    T: float
+        time to maturity (in year fractions)
+    r: float
+        constant risk-free short rate
+        assume flat term structure
+    sigma: float
+        volatility factor
+    barrier: float
+        barrier
+    rebate maturity: float
+        time to maturity of the rebate component (in year fraction)
+    div_yield: float
+        dividend_yield, in percentage %, default = 0.0%
+    
+    """
+
+    def __init__(self, S0: float, K: float, T: float, r: float, sigma: float, barrier: float, rebate_maturity: float, div_yield: float = 0.0):
+        assert sigma >= 0, 'volatility cannot be less than zero'
+        assert S0 >= 0, 'initial stock price cannot be less than zero'
+        assert T >= 0, 'time to maturity cannot be less than zero'
+        assert div_yield >= 0, 'dividend yield cannot be less than zero'
+
+        self.S0 = float(S0)
+        self.K = float(K)
+        self.T = float(T)
+        self.r = float(r)
+        self.sigma = float(sigma)
+        self.q = float(div_yield)
+        self.G = (2*(self.r - self.q))/(self.sigma**2)
+        self.g = self.G-1 
+        self.gg = self.G+1 
+        self.H = float(barrier)
+        self.T0 = float(rebate_maturity)
+        
+        self._d1, self._d2 = self._calculate_d1_d2()
+
+
+    def _calculate_d1_d2(self):
+        d1 = ((log(self.S0 / self.K) + (self.r - self.q + 0.5 * self.sigma ** 2) * self.T) / (self.sigma * sqrt(self.T)))
+        d2 = d1 - self.sigma * sqrt(self.T)
+
+        return d1, d2
+
+    def option_value(self, option_type: str) -> float:
+        
+        option_type = str(option_type)
+     
+        
+        
+        call_value = (self.S0 * exp(-self.q * self.T) * stats.norm.cdf(self._d1, 0.0, 1.0) - self.K * exp(-self.r * self.T) * stats.norm.cdf(self._d2, 0.0, 1.0))
+        
+        
+        put_value = call_value + exp(-self.r * self.T) * self.K - exp(-self.q * self.T) * self.S0
+        
+        
+        if option_type == "call":
+            option_price = call_value
+        elif option_type == "put":
+            option_price = put_value
+            
+        return option_price
+
+        
+    
+    def dbs(self, x, y, t):
+        
+        return (log(x/y) + (self.r - self.q - (self.sigma**2)/2)*t)/(self.sigma*sqrt(t))
+    
+    def dbs1(self, x, y, t):
+        
+        return self.dbs(x, y, t) + self.sigma * sqrt(t)
+        
+    def lookback_BSM(self, option_type: str, ST: float, max_share_price: float, min_share_price: float, rebate_maturity: float) -> float:
+        """
+        A European lookback call at maturity pays St - min(St).
+        A European lookback put at maturity pays max(St) - St.
+        min(St) is the minimum price over the life of the option
+        max(St) is the maximum price over the life of the option
+        Robert. L. MacDonald: Derivatives Markets (3rd. edition)
+        Chapter 23: Exotic Option II
+        Formula 23.47 (Exercise)
+        :param option_type: call, put
+        :param max_share_price: maximum share price
+        :param min_share_price: minimum share price
+        :return: value of lookback option
+        """
+        
+        assert option_type == "call" or option_type == "put"
+
+        if option_type == "call":
+            self.w = 1
+            self.s_bar = float(min_share_price)
+
+        elif option_type == "put":
+            self.w = -1
+            self.s_bar = float(max_share_price)
+            
+        T0 = float(rebate_maturity)
+        ST = float(ST)
+        return self.w * ST * exp(- self.q * T0) * stats.norm.cdf(self.w*self.dbs1(ST, self.s_bar, T0)) - self.w * self.s_bar * exp(-self.r * T0) * stats.norm.cdf(self.w * self.dbs(ST, self.s_bar, T0)) + (ST/self.G)*((self.w * exp(-self.r* T0)*((ST/self.s_bar)**(-self.G))*stats.norm.cdf(self.w * self.dbs(self.s_bar, ST, T0))) - self.w* exp(- self.q* T0)*(stats.norm.cdf(- self.w * self.dbs1(ST, self.s_bar, T0))))
+    
+    def barrier_BSM(self, option_type: str, H):
+        #DOMINGUE FORMULA
+        self.H = H
+        
+        self.H2 = H**2
+        self.ratio = self.H/self.S0
+        self.Ratio = self.H2/self.S0
+        
+        if option_type == "call":
+            self.v = 1
+
+        elif option_type == "put":
+            self.v = -1
+        
+        knock_out = self.v*self.S0*exp(-self.q*self.T)*stats.norm.cdf(self.v*self.dbs1(self.S0, self.H, self.T)) - self.v*self.H*exp(- self.r*self.T)*stats.norm.cdf(self.v*self.dbs(self.S0, self.H, self.T)) - self.v*(self.ratio**self.g)*(self.Ratio*exp(-self.q*self.T)*stats.norm.cdf(self.v*self.dbs1(self.Ratio,self.H, self.T)) - self.H*exp(-self.r*self.T)*stats.norm.cdf(self.v*self.dbs(self.Ratio,self.H, self.T))) + self.v*(self.H-self.K)*exp(-self.r*self.T)*(stats.norm.cdf(self.v*self.dbs(self.S0, self.H, self.T)) - (self.ratio**self.g)*stats.norm.cdf(self.v*self.dbs(self.Ratio, self.H, self.T)))
+        
+        return knock_out
+    
+    def DR(self):
+        
+        self.sigma2 = self.sigma**2
+    
+        self.o = np.sign(np.log(self.S0/self.H))
+        
+        b1 = self.r - self.q - self.sigma2/2
+        b1_squared = b1**2
+        b2 = b1_squared + 2*self.r*self.sigma2
+        self.beta = sqrt(b2)
+        
+        self.a_plus = (self.r - self.q - self.sigma2/2 + self.beta)/self.sigma2
+        self.a_minus = (self.r - self.q - self.sigma2/2 - self.beta)/self.sigma2
+           
+        self.j_plus = (np.log(self.ratio) + self.beta*self.T)/(self.sigma*sqrt(self.T))
+      
+        self.j_minus = (np.log(self.ratio) - self.beta*self.T)/(self.sigma*sqrt(self.T))
+        
+        dr = (self.ratio**self.a_plus)*stats.norm.cdf(self.o*self.j_plus) + (self.ratio**self.a_minus)*stats.norm.cdf(self.o*self.j_minus)
+        
+        return dr
+    
+    def turbowarrant(self, option_type: str):
+        
+        self.option_type = option_type
+      
+        TWC = self.barrier_BSM("call", self.H) + (self.lookback_BSM("call", self.H, 0, self.K, self.T0) - self.lookback_BSM("call", self.H, 0, self.H, self.T0))*self.DR()
+        
+        TWP = self.barrier_BSM("put", self.H) + (self.lookback_BSM("put", self.H, self.K, 0, self.T0) - self.lookback_BSM("put", self.H, self.H, 0, self.T0)) *self.DR()
+        
+        
+        
+        if option_type == "call":
+            return TWC
+
+        elif option_type == "put":
+            return TWP
+        
+    def plot_variable_vs_output(self, option_type: str, variable_range):
+        import matplotlib.pyplot as plt
+        
+        option_type = str(option_type)
+        
+        if option_type == "call":
+            direction = "call"
+        if option_type == "put":
+            direction = "put"
+
+        # Initialize lists to store variable values, output values, and delta values
+        variable_values = []
+        turbo_prices = []
+        option_prices =[]
+        delta_TWs = []  
+        delta_OPTIONs = []
+
+        prev_turboprice = None
+        prev_optionprice = None
+        
+        
+
+        for value in variable_range:
+            # Update the variable of interest
+            # Create a new instance of BSMOptionValuation with the current value of S0
+            bsm_instance = TurboValuation(value, K, T, r, sigma, barrier, T0, div_yield)
+
+            # Calculate the output using the new instance
+            turbo_price = bsm_instance.turbowarrant(direction)
+            option_price = bsm_instance.option_value(direction)
+
+            # Append values to the lists
+            variable_values.append(value)
+            turbo_prices.append(turbo_price)
+            option_prices.append(option_price)
+
+
+            # Calculate delta as a percentage change
+            if prev_turboprice is not None:
+                delta_TW = (turbo_price - prev_turboprice)#/ prev_output) * 100.0
+                
+                delta_TWs.append(delta_TW)  # Append the calculated delta
+            else:
+            # Handle the case where prev_output is None (first data point)
+                delta_TW = 0.0  # You can set it to 0 or handle it differently
+            
+        
+            
+            # Calculate delta as a percentage change
+            if prev_optionprice is not None:
+                delta_option = (option_price - prev_optionprice)#/ prev_output) * 100.0
+                
+                delta_OPTIONs.append(delta_option)  # Append the calculated delta
+            else:
+            # Handle the case where prev_output is None (first data point)
+                delta_option = 0.0  # You can set it to 0 or handle it differently
+            
+          
+        
+            prev_turboprice = turbo_price
+            prev_optionprice = option_price
+              
+        # Create a subplot with two plots: Output and Delta
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(8, 10))
+
+        # Plot Output
+        axes[0].plot(variable_values, turbo_prices, label='Turbo Price')
+        axes[0].plot(variable_values, option_prices, label='Option Price')
+        axes[0].set_xlabel('Variable of Interest')
+        axes[0].set_ylabel('Derivative Price')
+        axes[0].set_title('Derivatives vs. Variable of Interest')
+        axes[0].grid(True)
+ 
+        # Plot Delta
+        axes[1].plot(variable_values[1:], delta_TWs, label='Delta Turbo')
+        axes[1].plot(variable_values[1:], delta_OPTIONs, label='Delta Option')
+        axes[1].set_xlabel('Variable of Interest')
+        axes[1].set_ylabel('Delta')
+        axes[1].set_title('Delta vs. Variable of Interest')
+        axes[1].grid(True)
+
+        plt.tight_layout()  # Ensure proper spacing between subplots
+        plt.show()
+        
+    def delta_TW(self):
+        
+        print("price:", S0)
+        bsm_plusone =  TurboValuation(S0+1, K, T, r, sigma, barrier, T0, div_yield)
+        bsm_minusone = TurboValuation(S0-1, K, T, r, sigma, barrier, T0, div_yield)
+        delta_up = bsm_plusone.turbowarrant(self.option_type) - self.turbowarrant(self.option_type)
+        delta_down = bsm_minusone.turbowarrant(self.option_type) - self.turbowarrant(self.option_type)
+            
+        return delta_up, delta_down
+
+        
+
+"""
+==================        
+Variable to modify   
+"""
+S0 = 26
+K = 20
+T = 0.20
+r = 0.05
+sigma = 0.1
+div_yield = 0  
+barrier = 22
+T0 = 0.2
+direction = "call" #"put" or "call"
+"""
+==================
+"""
+
+# Define a range of values for the variable you want to study
+if direction == "put":
+    variable_range = np.linspace(S0-1,barrier, 1000)
+if direction == "call":
+    variable_range = np.linspace(barrier, S0+1, 1000)
+    
+# Exemple utilisation    
+TV = TurboValuation(S0, K, T, r, sigma, barrier, T0, div_yield)
+
+price_barrier = TV.barrier_BSM(direction, barrier)
+print("Barrier:", price_barrier)
+turbo = TV.turbowarrant(direction)
+print("turbo:", turbo)
+delta_tw = TV.delta_TW()
+print("delta +1; delta -1:", delta_tw)
+option_price = TV.option_value(direction)
+print("option price SO initial:", option_price)
+
+# Print delta 
+delta_tw = TV.delta_TW()
+print(delta_tw)
+
+# Plot the relationship between the variable and the output
+TV.plot_variable_vs_output(direction, variable_range)
+
+
